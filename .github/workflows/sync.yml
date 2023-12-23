@@ -400,3 +400,87 @@ jobs:
                 console.log(`Updated webhook a webhook in ${repo.repo.owner}/${repo.repo.repo}`)
               }
             }
+
+  sync-action-permissions:
+    needs: find-repos
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+      - name: Sync Action Permissions
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          github-token: ${{ secrets.GH_OWNER_TOKEN }}
+          script: |
+            const repos = ${{ needs.find-repos.outputs.repos }}
+
+            console.log(`Syncing action permissions for ${repos.length} repositories`)
+
+            for (const repo of repos) {
+              console.log(`Syncing action permissions for ${repo.owner}/${repo.repo}`)
+
+              await github.rest.actions.setGithubActionsDefaultWorkflowPermissionsRepository({
+                ...repo,
+                default_workflow_permissions: 'write',
+                can_approve_pull_request_reviews: true
+              })
+
+              console.log(`Synced action permissions for ${repo.owner}/${repo.repo}`)
+            }
+
+  check-readme:
+    needs: find-repos
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+      - name: Check Readme
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const repos = ${{ needs.find-repos.outputs.repos }}
+
+            console.log(`Checking readme for ${repos.length} repositories`)
+
+            io.mkdirP(`${{ github.workspace }}/tmp`)
+
+            const result = []
+
+            for (const repo of repos) {
+              console.log(`Checking readme for ${repo.owner}/${repo.repo}`)
+
+              awaut exec.exec('gh', ['repo', 'clone', `${repo.owner}/${repo.repo}`, `${{ github.workspace }}/tmp/${repo.repo}`])
+
+              const readme = (await glob.create(`${{ github.workspace }}/tmp/${repo.repo}/README*`)).glob()
+
+              if (readme.length !== 0) {
+                console.log(`Readme found for ${repo.owner}/${repo.repo}`)
+
+                continue
+              }
+
+              console.log(`Readme not found for ${repo.owner}/${repo.repo}`)
+
+              result.push(repo)
+            }
+      - name: Create Issue
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          github-token: ${{ secrets.GH_OWNER_TOKEN }}
+          script: |
+            const repos = ${{ steps.check-readme.outputs.result }}
+
+            console.log(`Creating issue for ${repos.length} repositories`)
+
+            for (const repo of repos) {
+              await github.rest.issues.create({
+                ...repo,
+                title: '[Documentation]: Create Readme',
+                body: `No readme was found in this repository. We should add a readme to this repository to explain what it is and how to use it.\n\nWe can refer to readme's from other repositories to get inspiration.\n\nHere are thf ollowing readmes we can take the structure from: [xkrishguptaa/reseter.css](https://github.com/xkrishguptaa/reseter.css) or [xkrishguptaa/go-todo-api](https://github.com/xkrishguptaa/go-todo-api)\n\nIf you have any questions, please reach out to me.\n\n<details><summary>What is a readme?</summary>A readme is a file that explains what a repository is and how to use it. It is the first thing people see when they visit a repository. It is important to have a readme so people know what your repository is and how to use it.</details><details><summary>How do I create a readme?</summary>Here is a [guide](https://docs.github.com/en/github/creating-cloning-and-archiving-repositories/creating-a-repository-on-github/about-readmes) on how to create a readme.</details><details><summary>What should I put in the readme?</summary>Here is a [guide](https://docs.github.com/en/github/creating-cloning-and-archiving-repositories/creating-a-repository-on-github/about-readmes) on what to put in a readme.</details>\n\nThank you for your help!\n\nP.S. This is an [automated issue](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.run_id}.`
+              })
+
+              console.log(`Created issue for ${repo.owner}/${repo.repo}`)
+            }
+
